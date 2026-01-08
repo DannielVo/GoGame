@@ -4,38 +4,36 @@ import random
 from typing import List, Tuple
 from core.board import Board, Player
 
+
 class HeuristicMinimaxBot:
     def __init__(self, color: Player, board_size: int = 9, depth: int | None = None):
         self.color = color
+        self.board_size = board_size
+        self.depth = depth if depth is not None else 2
+        self.resign_threshold = -30.0
 
-        # Depth
-        if depth is not None:
-            self.depth = depth
-        else:
-            self.depth = 2       
-
-    # === API chính ===
+    # ======================
+    # PUBLIC API
+    # ======================
 
     def select_move(self, board: Board, legal_moves: List[Tuple[int, int]]) -> Tuple[int, int] | None:
         if not legal_moves:
             return None
 
-        max_player = self.color
         best_score = -math.inf
         best_moves: List[Tuple[int, int]] = []
 
         for (x, y) in legal_moves:
-            # Tạo một bản sao để mô phỏng
-            child_board = board.copy()
-            success, _ = child_board.place_stone(max_player, x, y)
+            child = board.copy()
+            success, _ = child.place_stone(self.color, x, y)
             if not success:
                 continue
 
             score = self._minimax(
-                child_board,
+                child,
                 self.depth - 1,
                 maximizing=False,
-                max_player=max_player,
+                max_player=self.color,
                 alpha=-math.inf,
                 beta=math.inf,
             )
@@ -46,12 +44,20 @@ class HeuristicMinimaxBot:
             elif abs(score - best_score) <= 1e-6:
                 best_moves.append((x, y))
 
+        #return random.choice(best_moves) if best_moves else None
         if not best_moves:
             return None
 
+        # Nếu thế cờ quá tệ thì resign
+        if best_score < self.resign_threshold:
+            return "RESIGN"
+
         return random.choice(best_moves)
 
-    # === Minimax + Alpha-Beta ===
+
+    # ======================
+    # MINIMAX + ALPHA-BETA
+    # ======================
 
     def _minimax(
         self,
@@ -66,11 +72,10 @@ class HeuristicMinimaxBot:
         current_player = max_player if maximizing else max_player.opposite
         legal_moves = self._generate_legal_moves(board, current_player)
 
-        # Dừng nếu đạt độ sâu hoặc ko còn nước đi hợp lệ
         if depth == 0 or not legal_moves:
             return self._evaluate(board, max_player)
 
-        if maximizing:  # lượt bot
+        if maximizing:
             value = -math.inf
             for (x, y) in legal_moves:
                 child = board.copy()
@@ -89,13 +94,12 @@ class HeuristicMinimaxBot:
                         beta,
                     ),
                 )
-
                 alpha = max(alpha, value)
                 if beta <= alpha:
                     break
             return value
 
-        else:  # lượt đối thủ
+        else:
             value = math.inf
             for (x, y) in legal_moves:
                 child = board.copy()
@@ -114,60 +118,67 @@ class HeuristicMinimaxBot:
                         beta,
                     ),
                 )
-
                 beta = min(beta, value)
                 if beta <= alpha:
                     break
             return value
 
-    # === Sinh nước hợp lệ ===
+    # ======================
+    # MOVE GENERATION
+    # ======================
 
     def _generate_legal_moves(self, board: Board, player: Player) -> List[Tuple[int, int]]:
+        size = board.size
         moves = []
-        size = board.size  # 9
 
         for y in range(size):
             for x in range(size):
                 if board.get(x, y) != 0:
                     continue
 
-                # tránh copy nhiều => chỉ kiểm tra đơn giản
-                legal = False
+                # ưu tiên ô gần quân mình
                 for nx, ny in board._neighbors(x, y):
                     if board.get(nx, ny) == player.value:
-                        legal = True
+                        moves.append((x, y))
                         break
 
-                # nếu không cạnh quân mình => vẫn có thể hợp lệ nhưng ưu tiên bỏ qua
-                if not legal:
-                    continue
-
-                moves.append((x, y))
-
-        # nếu quá ít move thì lấy thêm full board (dự phòng)
-        if len(moves) < 15:
+        if len(moves) < 12:
             moves = [(x, y) for y in range(size) for x in range(size) if board.get(x, y) == 0]
 
-        # Sắp xếp ưu tiên trung tâm để bot thông minh hơn
-        def center_priority(move):
+        def move_priority(move):
             x, y = move
-            return -(4 - abs(4 - x) - abs(4 - y))  
+            score = 0
 
-        moves.sort(key=center_priority)
+            # Ưu tiên ăn quân / gây atari
+            for nx, ny in board._neighbors(x, y):
+                if board.get(nx, ny) == player.opposite.value:
+                    libs = self._group_liberty(board, nx, ny)
+                    if libs == 1:
+                        score += 100
+                    elif libs == 2:
+                        score += 20
 
-        # CHỈ LẤY TỐI ĐA 20 NƯỚC
-        return moves[:20]
+            # Ưu tiên trung tâm nhẹ
+            score += 4 - abs(4 - x) - abs(4 - y)
+            return -score
 
+        moves.sort(key=move_priority)
+        return moves[:15]
 
-    # === Heuristic Evaluation ===
+    # ======================
+    # HEURISTIC EVALUATION
+    # ======================
 
     def _evaluate(self, board: Board, max_player: Player) -> float:
+        size = board.size
         opp = max_player.opposite
-        size = board.size  # 9
 
         stone_diff = 0
-        liberty_diff = 0
         territory_diff = 0
+        capture_bonus = 0
+        group_penalty = 0
+
+        visited = set()
 
         for y in range(size):
             for x in range(size):
@@ -179,35 +190,63 @@ class HeuristicMinimaxBot:
                         nv = board.get(nx, ny)
                         if nv != 0:
                             neighbor_colors.add(nv)
-
                     if len(neighbor_colors) == 1:
-                        color_val = next(iter(neighbor_colors))
-                        if color_val == max_player.value:
+                        if max_player.value in neighbor_colors:
                             territory_diff += 1
                         else:
                             territory_diff -= 1
+                    continue
 
+                if v == max_player.value:
+                    stone_diff += 1
                 else:
-                    # stone diff
-                    if v == max_player.value:
-                        stone_diff += 1
-                    else:
-                        stone_diff -= 1
+                    stone_diff -= 1
 
-                    # local liberties
-                    libs = 0
-                    for nx, ny in board._neighbors(x, y):
-                        if board.get(nx, ny) == 0:
-                            libs += 1
+                if (x, y) in visited:
+                    continue
 
-                    if v == max_player.value:
-                        liberty_diff += libs
-                    else:
-                        liberty_diff -= libs
+                libs, group = self._group_liberty_and_group(board, x, y)
+                visited |= group
 
-        # Trọng số tuned cho 9×9:
+                if v == max_player.value:
+                    if libs == 1:
+                        group_penalty -= 8
+                else:
+                    if libs == 1:
+                        capture_bonus += 8
+
         return (
-            1.2 * stone_diff        # quân rất quan trọng
-            + 0.7 * territory_diff  # territory mạnh hơn
-            + 0.1 * liberty_diff    # local safety nhẹ
+            1.5 * stone_diff
+            + 0.6 * territory_diff
+            + capture_bonus
+            + group_penalty
         )
+
+    # ======================
+    # GROUP / LIBERTY UTILS
+    # ======================
+
+    def _group_liberty(self, board: Board, x: int, y: int) -> int:
+        libs, _ = self._group_liberty_and_group(board, x, y)
+        return libs
+
+    def _group_liberty_and_group(self, board: Board, x: int, y: int):
+        color = board.get(x, y)
+        stack = [(x, y)]
+        visited = set()
+        liberties = set()
+
+        while stack:
+            cx, cy = stack.pop()
+            if (cx, cy) in visited:
+                continue
+            visited.add((cx, cy))
+
+            for nx, ny in board._neighbors(cx, cy):
+                v = board.get(nx, ny)
+                if v == 0:
+                    liberties.add((nx, ny))
+                elif v == color:
+                    stack.append((nx, ny))
+
+        return len(liberties), visited

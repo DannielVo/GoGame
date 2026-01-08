@@ -203,6 +203,11 @@ class GoGame:
             return
 
         move = self.bot.select_move(self.board.copy(), legal)
+
+        if move == "RESIGN":
+            self.resign(loser=self.current_player)
+            return
+
         if move is None:
             # Bot quyết định pass
             self.pass_turn()
