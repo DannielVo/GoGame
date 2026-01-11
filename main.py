@@ -48,7 +48,7 @@ class GoApp:
             board_size   = kwargs.get("board_size", 19)
             mode         = kwargs.get("mode", GameMode.HUMAN_VS_HUMAN)
             board_style  = kwargs.get("board_style", "wood")
-            human_color  = kwargs.get("human_color", Player.BLACK)  # <-- thêm dòng này
+            human_color  = kwargs.get("human_color", Player.BLACK)  
 
             self.current_screen = GameScreen(
                 self,

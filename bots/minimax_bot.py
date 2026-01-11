@@ -12,10 +12,6 @@ class HeuristicMinimaxBot:
         self.depth = depth if depth is not None else 2
         self.resign_threshold = -30.0
 
-    # ======================
-    # PUBLIC API
-    # ======================
-
     def select_move(self, board: Board, legal_moves: List[Tuple[int, int]]) -> Tuple[int, int] | None:
         if not legal_moves:
             return None
@@ -44,7 +40,7 @@ class HeuristicMinimaxBot:
             elif abs(score - best_score) <= 1e-6:
                 best_moves.append((x, y))
 
-        #return random.choice(best_moves) if best_moves else None
+        # return random.choice(best_moves) if best_moves else None
         if not best_moves:
             return None
 
